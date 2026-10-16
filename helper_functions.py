@@ -70,10 +70,77 @@ def neighbor_joining(distances: np.ndarray, labels: list) -> Node:
         A root node of the neighbor joining tree.
 
     """
-    
-    self.tree = Node()
+    # Work on a copy so the matrix that was passed in is never changed
+    # (one of the unit tests checks this)
+    D = np.array(distances, dtype=float)
 
-    raise NotImplementedError()
+
+    # Every label starts as its own leaf node with no children
+    nodes = [Node(lab, None, 0.0, None, 0.0) for lab in labels]
+
+
+    # Used to give each new internal node a unique name. reroot_tree finds
+    # nodes by name, so the names must not repeat
+    counter = 0
+
+
+    # Keep joining pairs until only two nodes are left
+    while len(nodes) > 2:
+        n = len(nodes)
+
+
+        # r[i] = sum of distances from node i to every other node
+        r = D.sum(axis=1)
+
+
+        # Q matrix: the pair with the smallest Q is joined next.
+        # Q(i, j) = (n - 2) * d(i, j) - r[i] - r[j]
+        Q = (n - 2) * D - r[:, None] - r[None, :]
+
+
+        # A node can't be joined with itself, so make the diagonal huge
+        np.fill_diagonal(Q, np.inf)
+
+
+        # argmin gives the first smallest value, which also settles ties
+        i, j = np.unravel_index(np.argmin(Q), Q.shape)
+        if i > j:
+            i, j = j, i
+
+
+        # Branch lengths from the new node down to nodes i and j
+        d_ij = D[i, j]
+        d_i = 0.5 * d_ij + (r[i] - r[j]) / (2 * (n - 2))
+        d_j = d_ij - d_i
+
+
+        # The new internal node has i and j as its children
+        new_node = Node(f"node_{counter}", nodes[i], d_i, nodes[j], d_j)
+        counter += 1
+
+
+        # Distance from the new node to every other node k:
+        # d(new, k) = (d(i, k) + d(j, k) - d(i, j)) / 2
+        d_new = 0.5 * (D[i] + D[j] - d_ij)
+
+
+        # Build the smaller matrix: drop rows/columns i and j, and add the
+        # new node at the END (the docstring asks for this)
+        keep = [k for k in range(n) if k not in (i, j)]
+        D_next = np.zeros((len(keep) + 1, len(keep) + 1))
+        D_next[:-1, :-1] = D[np.ix_(keep, keep)]
+        D_next[-1, :-1] = d_new[keep]
+        D_next[:-1, -1] = d_new[keep]
+
+
+        nodes = [nodes[k] for k in keep] + [new_node]
+        D = D_next
+
+
+    # Two nodes left. Join them under a root, putting the root halfway
+    # along the branch between them
+    d = D[0, 1]
+    return Node("root", nodes[0], d / 2, nodes[1], d / 2)
 
 
 def plot_nj_tree(tree: Node, ax: Axes = None, **kwargs) -> None:
