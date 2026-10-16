@@ -143,7 +143,8 @@ def neighbor_joining(distances: np.ndarray, labels: list) -> Node:
     return Node("root", nodes[0], d / 2, nodes[1], d / 2)
 
 
-def plot_nj_tree(tree: Node, ax: Axes = None, **kwargs) -> None:
+def plot_nj_tree(tree: Node, ax: Axes = None, leaf_colors: dict = None,
+                 fontsize: int = 10, **kwargs) -> None:
     """A function for plotting neighbor joining phylogeny dendrogram.
 
     Parameters
@@ -166,8 +167,73 @@ def plot_nj_tree(tree: Node, ax: Axes = None, **kwargs) -> None:
     >>> fig.savefig("example.png")
 
     """
+    import matplotlib.pyplot as plt
+
+    # If no axes were given, make a new one
+    if ax is None:
+        _, ax = plt.subplots()
+    leaf_colors = leaf_colors or {}
+
+
+    # These are one-item lists so the inner function can change them
+    next_leaf_y = [0]   # the y position the next leaf will get
+    max_x = [0.0]       # the furthest right x we have drawn to
+
+
+    def draw(node: Node, x: float) -> float:
+        """Draw the subtree starting at `node`, which sits at position x.
+        Returns the y position of the node so its parent can use it."""
+        max_x[0] = max(max_x[0], x)
+
+
+        # Leaf: give it the next free y position and write its name
+        if node.left is None and node.right is None:
+            y = next_leaf_y[0]
+            next_leaf_y[0] += 1
+            ax.text(x, y, f"  {node.name}", va="center", fontsize=fontsize,
+                    color=leaf_colors.get(node.name, "k"))
+            return y
+
+
+        # Internal node: a child sits at (this x + its branch length)
+        x_left = x + node.left_distance
+        x_right = x + node.right_distance
+
+
+        # Draw the children first, because this node's y position
+        # depends on where they ended up
+        y_left = draw(node.left, x_left)
+        y_right = draw(node.right, x_right)
+
+
+        # Vertical line joining the two children
+        ax.plot([x, x], [y_left, y_right], color="k", lw=1.5)
+        # Horizontal branches out to each child
+        ax.plot([x, x_left], [y_left, y_left], color="k", lw=1.5)
+        ax.plot([x, x_right], [y_right, y_right], color="k", lw=1.5)
+
+
+        # This node sits halfway between its two children
+        return (y_left + y_right) / 2
+
+
+    # The root is at x = 0
+    root_y = draw(tree, 0.0)
+
+    # Short line to the left of the root, like in the example figure
+    stub = 0.03 * max_x[0] if max_x[0] > 0 else 0.2
+    ax.plot([-stub, 0], [root_y, root_y], color="k", lw=1.5)
+
+
+    # Leave room on the right for the leaf names, and tidy the axes
+    ax.margins(x=0.3)
+    ax.set_xlabel("Genetic distance")
+    ax.set_yticks([])
+    for side in ["top", "right", "left"]:
+        ax.spines[side].set_visible(False)
 
     return ax
+
 
 
 def _find_a_parent_to_node(tree: Node, node: Node) -> tuple:
@@ -287,3 +353,109 @@ def plot_nj_tree_radial(tree: Node, ax: Axes = None, **kwargs) -> None:
 
     """
     raise NotImplementedError()
+
+def global_alignment(seq1, seq2, scoring_function):
+    """Global sequence alignment using the Needleman–Wunsch algorithm.
+    Parameters
+    ----------
+    seq1: str
+        First sequence to be aligned.
+    seq2: str
+        Second sequence to be aligned.
+    scoring_function: Callable
+        Takes two characters (either can be "-" for a gap) and returns
+        their score.
+
+    Returns
+    -------
+    (str, str, float)
+        The two aligned sequences and the final alignment score.
+
+    Examples
+    --------
+    >>> global_alignment("abracadabra", "dabarakadara", lambda x, y: [-1, 1][x == y])
+    ('-ab-racadabra', 'dabarakada-ra', 5.0)
+    """
+    n_rows = len(seq1)
+    n_cols = len(seq2)
+
+
+    # dp_table[r, c] = best score for aligning the first r letters of seq1
+    #                  with the first c letters of seq2
+    # directions[r, c] = which move gave that best score, used later to
+    #                    walk back and rebuild the alignment
+    dp_table = np.zeros((n_rows + 1, n_cols + 1), dtype=float)
+    directions = np.zeros((n_rows + 1, n_cols + 1), dtype=int)
+    DIAG, UP, LEFT = 1, 2, 3
+
+
+    # First column: seq1's letters aligned against nothing, so every one
+    # of them is paired with a gap
+    for r in range(1, n_rows + 1):
+        dp_table[r, 0] = dp_table[r - 1, 0] + scoring_function(seq1[r - 1], "-")
+        directions[r, 0] = UP
+    # First row: same thing for seq2's letters
+    for c in range(1, n_cols + 1):
+        dp_table[0, c] = dp_table[0, c - 1] + scoring_function("-", seq2[c - 1])
+        directions[0, c] = LEFT
+
+
+    # Fill in the rest of the table. Row r is the letter seq1[r - 1] and
+    # column c is seq2[c - 1] (the table has an extra row and column)
+    for r in range(1, n_rows + 1):
+        for c in range(1, n_cols + 1):
+            # Pair the two letters: come from the diagonal cell
+            diag_val = dp_table[r - 1, c - 1] + scoring_function(seq1[r - 1], seq2[c - 1])
+            # seq1's letter against a gap: come from the cell above
+            up_val = dp_table[r - 1, c] + scoring_function(seq1[r - 1], "-")
+            # seq2's letter against a gap: come from the cell on the left
+            left_val = dp_table[r, c - 1] + scoring_function("-", seq2[c - 1])
+
+
+            best_val = max(diag_val, up_val, left_val)
+            dp_table[r, c] = best_val
+
+
+            # Remember which move won. Ties go diagonal, then up, then left
+            if best_val == diag_val:
+                directions[r, c] = DIAG
+            elif best_val == up_val:
+                directions[r, c] = UP
+            else:
+                directions[r, c] = LEFT
+
+
+    # Traceback: start in the bottom-right corner and follow the stored
+    # directions back to (0, 0). This builds the alignment backwards
+    aligned_a = []
+    aligned_b = []
+    r, c = n_rows, n_cols
+    while r > 0 or c > 0:
+        step = directions[r, c]
+        if step == DIAG:
+            # Both letters are paired with each other
+            aligned_a.append(seq1[r - 1])
+            aligned_b.append(seq2[c - 1])
+            r -= 1
+            c -= 1
+        elif step == UP:
+            # seq1's letter is paired with a gap in seq2
+            aligned_a.append(seq1[r - 1])
+            aligned_b.append("-")
+            r -= 1
+        else:
+            # seq2's letter is paired with a gap in seq1
+            aligned_a.append("-")
+            aligned_b.append(seq2[c - 1])
+            c -= 1
+
+
+    # Reverse, because we built the strings from the end to the start
+    final_seq1 = "".join(reversed(aligned_a))
+    final_seq2 = "".join(reversed(aligned_b))
+    final_score = float(dp_table[n_rows, n_cols])
+    return final_seq1, final_seq2, final_score
+
+git add helper_functions.py
+>> >> git commit -m "Part 2: plot_nj_tree dendrogram plotting & global alignment implementation"
+>> >> git push origin master
