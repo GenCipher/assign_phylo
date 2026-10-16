@@ -314,6 +314,14 @@ def reroot_tree(original_tree: Node, outgroup_node: Node) -> Node:
 
     return new_root
 
+def _count_leaves(node: Node) -> int:
+    """Count the leaves in the subtree below `node` (helper for sorting)."""
+    if node is None:
+        return 0
+    # A leaf has no children
+    if node.left is None and node.right is None:
+        return 1
+    return _count_leaves(node.left) + _count_leaves(node.right)
 
 def sort_children_by_leaves(tree: Node) -> None:
     """Sort the children of a tree by their corresponding number of leaves.
@@ -326,7 +334,23 @@ def sort_children_by_leaves(tree: Node) -> None:
         The root node of the tree.
 
     """
-    raise NotImplementedError()
+    # Nothing to sort at a leaf
+    if tree is None or (tree.left is None and tree.right is None):
+        return
+
+
+    # Sort the subtrees first, then this node
+    sort_children_by_leaves(tree.left)
+    sort_children_by_leaves(tree.right)
+
+
+    # The child with fewer leaves should be on the left. When swapping the
+    # children, swap their branch lengths too, because a distance belongs
+    # to its branch
+    if _count_leaves(tree.left) > _count_leaves(tree.right):
+        tree.left, tree.right = tree.right, tree.left
+        tree.left_distance, tree.right_distance = tree.right_distance, tree.left_distance
+
 
 
 def plot_nj_tree_radial(tree: Node, ax: Axes = None, **kwargs) -> None:
@@ -455,7 +479,3 @@ def global_alignment(seq1, seq2, scoring_function):
     final_seq2 = "".join(reversed(aligned_b))
     final_score = float(dp_table[n_rows, n_cols])
     return final_seq1, final_seq2, final_score
-
-git add helper_functions.py
->> >> git commit -m "Part 2: plot_nj_tree dendrogram plotting & global alignment implementation"
->> >> git push origin master
